@@ -26,7 +26,7 @@ const ComponentFunction = function() {
   // @end:theme
 
   // Firebase Realtime Database Endpoint Configuration
-  const FIREBASE_DB_URL = 'https://aquacontrol-6408d-default-rtdb.asia-southeast1.firebasedatabase.app';
+  const FIREBASE_DB_URL = '';
 
   // Cloud Network Bridge Helpers (REST API Engine)
   const firebaseWrite = async function(path, value) {
@@ -103,10 +103,10 @@ const ComponentFunction = function() {
         // 1. SEND EMAIL (EmailJS)
         // ---------------------------------------------------------
         var emailData = {
-          service_id: 'service_8y2n5rm', 
-          template_id: 'template_5xrvhys',
-          user_id: 'Q14Pz_dnjTD4fXz33',
-          accessToken: 'MLI2QAym65VPSq4oj0SV_',
+          service_id: '', 
+          template_id: '',
+          user_id: '',
+          accessToken: '',
           template_params: {
             farmer_name: 'Navidu Atulugama',
             alert_subject: '⚠️ CRITICAL AQUAFARM FAILURE DETECTED',
