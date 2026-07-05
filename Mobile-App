@@ -1,0 +1,909 @@
+// Global Singleton Lock - Placed outside the component so it never resets accidentally
+let globalAlertLock = false;
+
+const ComponentFunction = function() {
+  // @section:imports @depends:[]
+  const React = require('react');
+  const { useState, useEffect, useMemo, useCallback, useRef } = React;
+  const { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert, Platform, StatusBar, Dimensions } = require('react-native');
+  const { useSafeAreaInsets } = require('react-native-safe-area-context');
+  const { useStorage } = require('platform-hooks');
+  // @end:imports
+
+  // @section:theme @depends:[]
+  const primaryColor = '#0a0a0a';
+  const accentColor = '#3b82f6';
+  const backgroundColor = '#ffffff';
+  const cardColor = '#f5f5f5';
+  const textPrimary = '#0a0a0a';
+  const textSecondary = '#737373';
+  const statusGreenBg = '#16A34A';
+  const statusRedBg = '#DC2626';
+  const drainRed = '#DC2626';
+  const refillGreen = '#15803D';
+  const borderColor = '#E5E7EB';
+  const sectionBg = '#F8FAF8';
+  // @end:theme
+
+  // Firebase Realtime Database Endpoint Configuration
+  const FIREBASE_DB_URL = 'https://aquacontrol-6408d-default-rtdb.asia-southeast1.firebasedatabase.app';
+
+  // Cloud Network Bridge Helpers (REST API Engine)
+  const firebaseWrite = async function(path, value) {
+    try {
+      const url = FIREBASE_DB_URL + '/' + path + '.json';
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(value)
+      });
+      return await response.json();
+    } catch (error) {
+      console.error('Firebase Cloud write exception:', error);
+      return null;
+    }
+  };
+
+  const firebaseRead = async function(path) {
+    try {
+      const url = FIREBASE_DB_URL + '/' + path + '.json';
+      const response = await fetch(url, { method: 'GET' });
+      return await response.json();
+    } catch (error) {
+      console.error('Firebase Cloud read exception:', error);
+      return null;
+    }
+  };
+
+  const sleep = function(ms) {
+    return new Promise(function(resolve) { setTimeout(resolve, ms); });
+  };
+
+  // @section:useDashboardState @depends:[theme]
+  var DEFAULT_CONFIG = { drainTime: '10', delayTime: '5', refillTime: '15' };
+
+  var useDashboardState = function() {
+    var configState = useStorage('maintenance_config', DEFAULT_CONFIG);
+    var config = configState[0];
+    var setConfig = configState[1];
+
+    var tempState = useState('Connecting...');
+    var temp = tempState[0]; var setTemp = tempState[1];
+
+    var phState = useState('Connecting...');
+    var ph = phState[0]; var setPh = phState[1];
+
+    var turbidityState = useState('Connecting...');
+    var turbidity = turbidityState[0]; var setTurbidity = turbidityState[1];
+
+    var tempEvalState = useState('Reading...');
+    var tempEval = tempEvalState[0]; var setTempEval = tempEvalState[1];
+
+    var phEvalState = useState('Reading...');
+    var phEval = phEvalState[0]; var setPhEval = phEvalState[1];
+
+    var turbidityEvalState = useState('Reading...');
+    var turbidityEval = turbidityEvalState[0]; var setTurbidityEval = turbidityEvalState[1];
+
+    var statusBgState = useState(statusGreenBg);
+    var statusBg = statusBgState[0]; var setStatusBg = statusBgState[1];
+
+    var statusTextState = useState('✅ WATER STATUS: SAFE & OPTIMAL');
+    var statusText = statusTextState[0]; var setStatusText = statusTextState[1];
+
+    var sequenceProgressState = useState('System Status: Standby');
+    var sequenceProgress = sequenceProgressState[0]; var setSequenceProgress = sequenceProgressState[1];
+
+    // Emergency Alert Gateway Dispatch Engine (EmailJS + Telegram)
+    var sendEmergencyAlert = async function(currentPh, currentTemp, currentTurbidity) {
+      try {
+        console.log('Dispatching cloud emergency alert notifications...');
+        
+        // ---------------------------------------------------------
+        // 1. SEND EMAIL (EmailJS)
+        // ---------------------------------------------------------
+        var emailData = {
+          service_id: 'service_8y2n5rm', 
+          template_id: 'template_5xrvhys',
+          user_id: 'Q14Pz_dnjTD4fXz33',
+          accessToken: 'MLI2QAym65VPSq4oj0SV_',
+          template_params: {
+            farmer_name: 'Navidu Atulugama',
+            alert_subject: '⚠️ CRITICAL AQUAFARM FAILURE DETECTED',
+            ph_value: String(currentPh),
+            temp_value: String(currentTemp) + ' °C',
+            turbidity_value: String(currentTurbidity) + ' V',
+            timestamp: new Date().toLocaleString()
+          }
+        };
+
+        await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(emailData)
+        });
+
+        // ---------------------------------------------------------
+        // 2. SEND TELEGRAM MESSAGE (Direct Bot API)
+        // ---------------------------------------------------------
+        var telegramBotToken = "8721279885:AAHBcpF4aGQ5Pr04eU-g6KKvlBSVrKsp2nE";
+        var telegramChatId = "1087449863";
+        
+        var tgMessage = "🚨 *AQUAFARM CRITICAL ALERT* 🚨\n\n" +
+                        "🌡️ Temp: " + currentTemp + "°C\n" +
+                        "🧪 pH: " + currentPh + "\n" +
+                        "💧 Clarity: " + currentTurbidity + "V\n\n" +
+                        "Execute manual override immediately!";
+                        
+        var encodedMessage = encodeURIComponent(tgMessage);
+        var telegramUrl = "https://api.telegram.org/bot" + telegramBotToken + "/sendMessage?chat_id=" + telegramChatId + "&text=" + encodedMessage + "&parse_mode=Markdown";
+
+        await fetch(telegramUrl, { method: 'GET' });
+
+        // ---------------------------------------------------------
+        // 3. SHOW SUCCESS POPUP
+        // ---------------------------------------------------------
+        if (Platform.OS === 'web') {
+          window.alert('📧 Notification Dispatch Success! Email & Telegram sent.');
+        } else {
+          Alert.alert('Alert Dispatched', 'Emergency notification Email & Telegram sent successfully.');
+        }
+
+      } catch (error) {
+        console.error('Alert engine gateway failure:', error);
+        if (Platform.OS === 'web') {
+          window.alert('❌ Gateway Error: ' + error.message);
+        }
+      }
+    };
+
+    // Real-time 2-second telemetry polling loop and explicitly safe evaluation engine
+    useEffect(function() {
+      var pollTelemetry = async function() {
+        var tempData = await firebaseRead('Telemetry/temperature');
+        var phData = await firebaseRead('Telemetry/pH');
+        var turbidityData = await firebaseRead('Telemetry/turbidity');
+
+        if (tempData !== null) setTemp(String(tempData) + ' °C');
+        if (phData !== null) setPh(String(phData));
+        if (turbidityData !== null) setTurbidity(String(turbidityData) + ' V');
+
+        var tempValue = tempData !== null ? parseFloat(tempData) : NaN;
+        var phValue = phData !== null ? parseFloat(phData) : NaN;
+        var turbidityValue = turbidityData !== null ? parseFloat(turbidityData) : NaN;
+
+        // Explicit Check: Is the value mathematically critical right now?
+        var tempCritical = !isNaN(tempValue) && (tempValue < 18.0 || tempValue > 30.0);
+        var phCritical = !isNaN(phValue) && (phValue < 5.4 || phValue > 9.0);
+        var turbidityCritical = !isNaN(turbidityValue) && (turbidityValue < 0.40);
+
+        // Explicit Check: Is the value mathematically safe right now?
+        var tempSafe = !isNaN(tempValue) && (tempValue >= 18.0 && tempValue <= 30.0);
+        var phSafe = !isNaN(phValue) && (phValue >= 5.0 && phValue <= 9.0);
+        var turbiditySafe = !isNaN(turbidityValue) && (turbidityValue >= 0.40);
+
+        // Update UI Badges strictly based on proven states
+        if (tempCritical) setTempEval('⚠️ Critical State');
+        else if (tempSafe) setTempEval('✅ Normal');
+
+        if (phCritical) setPhEval('⚠️ Critical State');
+        else if (phSafe) setPhEval('✅ Normal');
+
+        if (turbidityCritical) setTurbidityEval('⚠️ Critical State');
+        else if (turbiditySafe) setTurbidityEval('✅ Normal');
+
+        // Master Logic Execution
+        var hasExplicitCritical = (tempCritical || phCritical || turbidityCritical);
+        var isSystemProvenSafe = (tempSafe && phSafe && turbiditySafe);
+
+        if (hasExplicitCritical) {
+          setStatusBg(statusRedBg);
+          setStatusText('⚠️ WATER UNHEALTHY');
+
+          // Check the hard global lock before firing an email/telegram
+          if (!globalAlertLock) {
+            globalAlertLock = true;
+            sendEmergencyAlert(phData, tempData, turbidityData);
+          }
+        } else if (isSystemProvenSafe) {
+          setStatusBg(statusGreenBg);
+          setStatusText('✅ WATER STATUS: SAFE & OPTIMAL');
+          
+          // Only unlock the alert cannon if EVERY sensor mathematically proves it is safe
+          globalAlertLock = false;
+        }
+        // NOTE: If values are NaN (network loss), neither block fires. The system cleanly holds its current lock state.
+      };
+
+      var intervalId = setInterval(pollTelemetry, 2000);
+      pollTelemetry(); 
+      return function() { clearInterval(intervalId); };
+    }, []);
+
+    return {
+      config: config,
+      setConfig: setConfig,
+      temp: temp,
+      ph: ph,
+      turbidity: turbidity,
+      tempEval: tempEval,
+      phEval: phEval,
+      turbidityEval: turbidityEval,
+      statusBg: statusBg,
+      statusText: statusText,
+      sequenceProgress: sequenceProgress,
+      setSequenceProgress: setSequenceProgress
+    };
+  };
+  // @end:useDashboardState
+
+  // @section:StatusBanner @depends:[styles]
+  var StatusBanner = function(props) {
+    return React.createElement(View, { testID: 'View-1', style: [styles.statusBanner, { backgroundColor: props.statusBg }],
+      componentId: 'Container_Status'
+    },
+      React.createElement(Text, { testID: 'Text-1', style: styles.statusMainLabel,
+        componentId: 'Label_Status'
+      }, props.statusText),
+      React.createElement(View, { testID: 'View-2', style: styles.statusDivider }),
+      React.createElement(Text, { testID: 'Text-2', style: styles.statusSubLabel,
+        componentId: 'Label_SequenceProgress'
+      }, props.sequenceProgress)
+    );
+  };
+  // @end:StatusBanner
+
+  // @section:TelemetryCard @depends:[styles]
+  var TelemetryCard = function(props) {
+    var title = props.title;
+    var value = props.value;
+    var evalText = props.evalText;
+    var iconText = props.iconText;
+    var valueId = props.valueId;
+    var evalId = props.evalId;
+    var accentCol = props.accentCol || primaryColor;
+
+    return React.createElement(View, { testID: 'View-3', style: styles.telemetryCard,
+      componentId: 'card-' + valueId
+    },
+      React.createElement(View, { testID: 'View-4', style: styles.telemetryCardHeader },
+        React.createElement(View, { testID: 'View-5', style: [styles.telemetryIconBadge, { backgroundColor: accentCol + '1A' }] },
+          React.createElement(Text, { testID: 'Text-3', style: { fontSize: 22 } }, iconText)
+        ),
+        React.createElement(Text, { testID: 'Text-4', style: styles.telemetryCardTitle }, title)
+      ),
+      React.createElement(View, { testID: 'View-6', style: styles.telemetryCardBody },
+        React.createElement(Text, { testID: 'Text-5', style: styles.telemetryValue,
+          componentId: valueId
+        }, value),
+        React.createElement(View, { testID: 'View-7', style: [styles.evalBadge, { backgroundColor: '#F3F4F6' }] },
+          React.createElement(Text, { testID: 'Text-6', style: styles.telemetryEval,
+            componentId: evalId
+          }, evalText)
+        )
+      )
+    );
+  };
+  // @end:TelemetryCard
+
+  // @section:MaintenanceTimers @depends:[styles]
+  var MaintenanceTimers = function(props) {
+    var config = props.config;
+    var onDrainChange = props.onDrainChange;
+    var onDelayChange = props.onDelayChange;
+    var onRefillChange = props.onRefillChange;
+
+    return React.createElement(View, { testID: 'View-8', style: styles.sectionCard,
+      componentId: 'section-timers'
+    },
+      React.createElement(View, { testID: 'View-9', style: styles.sectionHeaderRow },
+        React.createElement(View, { testID: 'View-10', style: [styles.sectionAccentBar, { backgroundColor: primaryColor }] }),
+        React.createElement(Text, { testID: 'Text-7', style: styles.sectionTitle }, 'Automated Maintenance Timers')
+      ),
+      React.createElement(Text, { testID: 'Text-8', style: styles.sectionSubtitle }, 'Configure cycle durations for automated drain and refill operations'),
+      React.createElement(View, { testID: 'View-11', style: styles.timersRow },
+        React.createElement(View, { testID: 'View-12', style: styles.timerInputGroup },
+          React.createElement(View, { testID: 'View-13', style: [styles.timerIconRow] },
+            React.createElement(Text, { testID: 'Text-9', style: { fontSize: 16 } }, '\uD83D\uDD53'),
+            React.createElement(Text, { testID: 'Text-10', style: styles.timerLabel }, 'Drain Time (sec)')
+          ),
+          React.createElement(TextInput, { testID: 'TextInput-1', style: styles.timerInput,
+            value: config && config.drainTime != null ? String(config.drainTime) : '10',
+            onChangeText: onDrainChange,
+            keyboardType: 'numeric',
+            placeholder: '10',
+            placeholderTextColor: '#9CA3AF',
+            maxLength: 4,
+            componentId: 'Input_DrainTime'
+          })
+        ),
+        React.createElement(View, { testID: 'View-14', style: styles.timerDividerV }),
+        React.createElement(View, { testID: 'View-15', style: styles.timerInputGroup },
+          React.createElement(View, { testID: 'View-16', style: styles.timerIconRow },
+            React.createElement(Text, { testID: 'Text-11', style: { fontSize: 16 } }, '\u23F8'),
+            React.createElement(Text, { testID: 'Text-12', style: styles.timerLabel }, 'Interlock Delay (sec)')
+          ),
+          React.createElement(TextInput, { testID: 'TextInput-2', style: styles.timerInput,
+            value: config && config.delayTime != null ? String(config.delayTime) : '5',
+            onChangeText: onDelayChange,
+            keyboardType: 'numeric',
+            placeholder: '5',
+            placeholderTextColor: '#9CA3AF',
+            maxLength: 4,
+            componentId: 'Input_DelayTime'
+          })
+        ),
+        React.createElement(View, { testID: 'View-17', style: styles.timerDividerV }),
+        React.createElement(View, { testID: 'View-18', style: styles.timerInputGroup },
+          React.createElement(View, { testID: 'View-19', style: styles.timerIconRow },
+            React.createElement(Text, { testID: 'Text-13', style: { fontSize: 16 } }, '\uD83D\uDCA7'),
+            React.createElement(Text, { testID: 'Text-14', style: styles.timerLabel }, 'Refill Time (sec)')
+          ),
+          React.createElement(TextInput, { testID: 'TextInput-3', style: styles.timerInput,
+            value: config && config.refillTime != null ? String(config.refillTime) : '15',
+            onChangeText: onRefillChange,
+            keyboardType: 'numeric',
+            placeholder: '15',
+            placeholderTextColor: '#9CA3AF',
+            maxLength: 4,
+            componentId: 'Input_RefillTime'
+          })
+        )
+      ),
+      React.createElement(View, { testID: 'View-20', style: styles.interlockNote },
+        React.createElement(Text, { testID: 'Text-15', style: { fontSize: 14 } }, '\u2139\uFE0F'),
+        React.createElement(Text, { testID: 'Text-16', style: styles.interlockNoteText }, 'Interlock delay is a safety pause between drain completion and refill start to protect pump hardware.')
+      )
+    );
+  };
+  // @end:MaintenanceTimers
+
+  // @section:ActionButtons @depends:[styles]
+  var ActionButtons = function(props) {
+    var onDrain = props.onDrain;
+    var onRefill = props.onRefill;
+    var onEmergencyStop = props.onEmergencyStop;
+
+    return React.createElement(View, { testID: 'View-21', style: styles.sectionCard,
+      componentId: 'section-actions'
+    },
+      React.createElement(View, { testID: 'View-22', style: styles.sectionHeaderRow },
+        React.createElement(View, { testID: 'View-23', style: [styles.sectionAccentBar, { backgroundColor: '#DC2626' }] }),
+        React.createElement(Text, { testID: 'Text-17', style: styles.sectionTitle }, 'Manual Control Override')
+      ),
+      React.createElement(Text, { testID: 'Text-18', style: styles.sectionSubtitle }, 'Force immediate activation of system components'),
+      React.createElement(TouchableOpacity, { testID: 'TouchableOpacity-1', style: styles.drainButton,
+        onPress: onDrain,
+        activeOpacity: 0.85,
+        componentId: 'Drain'
+      },
+        React.createElement(View, { testID: 'View-24', style: styles.actionButtonInner },
+          React.createElement(Text, { testID: 'Text-19', style: { fontSize: 20, marginRight: 10 } }, '\uD83D\uDEA8'),
+          React.createElement(View, { testID: 'View-25' },
+            React.createElement(Text, { testID: 'Text-20', style: styles.actionButtonLabel }, 'FORCE DRAIN PUMP ON'),
+            React.createElement(Text, { testID: 'Text-21', style: styles.actionButtonSub }, 'Activates drain pump immediately')
+          )
+        )
+      ),
+      React.createElement(View, { testID: 'View-26', style: { height: 12 } }),
+      React.createElement(TouchableOpacity, { testID: 'TouchableOpacity-2', style: styles.refillButton,
+        onPress: onRefill,
+        activeOpacity: 0.85,
+        componentId: 'Refill'
+      },
+        React.createElement(View, { testID: 'View-27', style: styles.actionButtonInner },
+          React.createElement(Text, { testID: 'Text-22', style: { fontSize: 20, marginRight: 10 } }, '\uD83D\uDCA6'),
+          React.createElement(View, { testID: 'View-28' },
+            React.createElement(Text, { testID: 'Text-23', style: styles.actionButtonLabel }, 'FORCE REFILL VALVE OPEN'),
+            React.createElement(Text, { testID: 'Text-24', style: styles.actionButtonSub }, 'Opens refill valve immediately')
+          )
+        )
+      ),
+      React.createElement(View, { testID: 'View-28b', style: { height: 12 } }),
+      React.createElement(TouchableOpacity, { testID: 'TouchableOpacity-stop', style: styles.stopButton,
+        onPress: onEmergencyStop,
+        activeOpacity: 0.85,
+        componentId: 'Stop'
+      },
+        React.createElement(View, { testID: 'View-stop-inner', style: styles.actionButtonInner },
+          React.createElement(Text, { testID: 'Text-stop-icon', style: { fontSize: 20, marginRight: 10 } }, '\u26D4'),
+          React.createElement(View, { testID: 'View-stop-text' },
+            React.createElement(Text, { testID: 'Text-stop-label', style: styles.actionButtonLabel }, 'EMERGENCY SHUTOFF'),
+            React.createElement(Text, { testID: 'Text-stop-sub', style: styles.actionButtonSub }, 'Turns off all pumps and valves')
+          )
+        )
+      )
+    );
+  };
+  // @end:ActionButtons
+
+  // @section:DashboardScreen @depends:[useDashboardState,StatusBanner,TelemetryCard,MaintenanceTimers,ActionButtons,styles]
+  var DashboardScreen = function() {
+    var state = useDashboardState();
+    var insets = useSafeAreaInsets();
+    var isRunningRef = useRef(false);
+
+    var handleDrainTimeChange = function(value) {
+      var sanitised = value.replace(/[^0-9]/g, '');
+      state.setConfig(function(prev) { return Object.assign({}, prev, { drainTime: sanitised }); });
+    };
+    var handleDelayTimeChange = function(value) {
+      var sanitised = value.replace(/[^0-9]/g, '');
+      state.setConfig(function(prev) { return Object.assign({}, prev, { delayTime: sanitised }); });
+    };
+    var handleRefillTimeChange = function(value) {
+      var sanitised = value.replace(/[^0-9]/g, '');
+      state.setConfig(function(prev) { return Object.assign({}, prev, { refillTime: sanitised }); });
+    };
+
+    // Sequential Interlocked Cloud Process Loop
+    var handleDrain = async function() {
+      if (isRunningRef.current) return;
+      isRunningRef.current = true;
+
+      try {
+        // Step 1: Force Drain Valve Open
+        state.setSequenceProgress('System Status: Draining Tank...');
+        await firebaseWrite('Controls/drain_relay', 1);
+        await sleep((parseInt(state.config.drainTime) || 10) * 1000);
+        await firebaseWrite('Controls/drain_relay', 0);
+
+        // Step 2: Safe Interlock Dwell Draining Pause
+        state.setSequenceProgress('System Status: Interlock Delay Pause...');
+        await sleep((parseInt(state.config.delayTime) || 5) * 1000);
+
+        // Step 3: Force Safe Fresh Refill Active
+        state.setSequenceProgress('System Status: Refilling Fresh Water...');
+        await firebaseWrite('Controls/refill_relay', 1);
+        await sleep((parseInt(state.config.refillTime) || 15) * 1000);
+        await firebaseWrite('Controls/refill_relay', 0);
+
+        // Step 4: Reset the Presentation Contamination Flag
+        await firebaseWrite('Simulation/inject_contamination_hack', 0);
+        state.setSequenceProgress('System Status: Standby');
+        
+        if (Platform.OS === 'web') {
+          window.alert('Automated sequence executed smoothly. Tank normalized.');
+        } else {
+          Alert.alert('Sequence Complete', 'Automated drain and refill complete.', [{ text: 'OK' }]);
+        }
+      } catch (error) {
+        state.setSequenceProgress('System Status: Error');
+        console.error(error);
+      } finally {
+        isRunningRef.current = false;
+      }
+    };
+
+    var handleRefill = async function() {
+      if (isRunningRef.current) return;
+      isRunningRef.current = true;
+      try {
+        state.setSequenceProgress('System Status: Refilling Fresh Water...');
+        await firebaseWrite('Controls/refill_relay', 1);
+        await sleep((parseInt(state.config.refillTime) || 15) * 1000);
+        await firebaseWrite('Controls/refill_relay', 0);
+        state.setSequenceProgress('System Status: Standby');
+      } catch (error) {
+        state.setSequenceProgress('System Status: Error');
+      } finally {
+        isRunningRef.current = false;
+      }
+    };
+
+    var handleEmergencyStop = async function() {
+      try {
+        state.setSequenceProgress('System Status: EMERGENCY SHUTOFF...');
+        // Write 0 to both relays immediately to stop hardware
+        await firebaseWrite('Controls/drain_relay', 0);
+        await firebaseWrite('Controls/refill_relay', 0);
+        // Release the running lock so normal buttons can be clicked again later
+        isRunningRef.current = false;
+        state.setSequenceProgress('System Status: Standby');
+      } catch (error) {
+        state.setSequenceProgress('System Status: Error');
+      }
+    };
+
+    // FAKE BUTTON 1: Trigger the critical state
+    var handleSecretHack = async function() {
+      await firebaseWrite('Simulation/inject_contamination_hack', 1);
+    };
+
+    // FAKE BUTTON 2: Restore the system back to normal
+    var handleNormalizeHack = async function() {
+      await firebaseWrite('Simulation/inject_contamination_hack', 0);
+    };
+
+    var windowHeight = Dimensions.get('window').height;
+    var scrollHeight = windowHeight - insets.top;
+
+    return React.createElement(View, { testID: 'View-29', style: { flex: 1, backgroundColor: backgroundColor },
+      componentId: 'dashboard-root'
+    },
+      React.createElement(StatusBar, { testID: 'StatusBar-1', barStyle: 'dark-content', backgroundColor: backgroundColor }),
+      React.createElement(ScrollView, { testID: 'ScrollView-1', style: Platform.OS === 'web' ? { height: scrollHeight, overflow: 'auto' } : { flex: 1 },
+        contentContainerStyle: {
+          paddingTop: insets.top + 8,
+          paddingBottom: insets.bottom + 32,
+          paddingHorizontal: 14
+        },
+        showsVerticalScrollIndicator: false,
+        componentId: 'dashboard-scroll'
+      },
+        React.createElement(View, { testID: 'View-30', style: styles.screenHeader },
+          React.createElement(Text, { testID: 'Text-25', style: [styles.screenHeaderSub, { opacity: 1 }] }, ' Water Management System'),
+          React.createElement(Text, { testID: 'Text-26', style: [styles.screenHeaderTitle, { color: '#295cc3' }] }, 'AquaFarm Dashboard')
+        ),
+        React.createElement(StatusBanner, {
+          statusBg: state.statusBg,
+          statusText: state.statusText,
+          sequenceProgress: state.sequenceProgress
+        }),
+        React.createElement(View, { testID: 'View-31', style: styles.telemetrySection },
+          React.createElement(View, { testID: 'View-32', style: styles.sectionLabelRow },
+            React.createElement(View, { testID: 'View-33', style: [styles.sectionAccentBar, { backgroundColor: primaryColor }] }),
+            React.createElement(Text, { testID: 'Text-27', style: styles.sectionTitle }, 'Live Water Quality Telemetry')
+          ),
+          React.createElement(TelemetryCard, { testID: 'TelemetryCard-1', title: 'Water Temperature',
+            value: state.temp,
+            evalText: state.tempEval,
+            iconText: '\uD83C\uDF21',
+            valueId: 'Label_Temp',
+            evalId: 'Label_TempEval',
+            accentCol: '#F59E0B'
+          }),
+          React.createElement(TelemetryCard, { testID: 'TelemetryCard-2', title: 'Water pH Balance',
+            value: state.ph,
+            evalText: state.phEval,
+            iconText: '\uD83E\uDDEA',
+            valueId: 'Label_pH',
+            evalId: 'Label_pHEval',
+            accentCol: '#3B82F6'
+          }),
+          React.createElement(TelemetryCard, { testID: 'TelemetryCard-3', title: 'Water Clarity',
+            value: state.turbidity,
+            evalText: state.turbidityEval,
+            iconText: '\uD83D\uDCA7',
+            valueId: 'Label_Turbidity',
+            evalId: 'Label_TurbidityEval',
+            accentCol: '#06B6D4'
+          })
+        ),
+        React.createElement(MaintenanceTimers, { testID: 'MaintenanceTimers-1', config: state.config,
+          onDrainChange: handleDrainTimeChange,
+          onDelayChange: handleDelayTimeChange,
+          onRefillChange: handleRefillTimeChange
+        }),
+        React.createElement(ActionButtons, { testID: 'ActionButtons-1', onDrain: handleDrain,
+          onRefill: handleRefill,
+          onEmergencyStop: handleEmergencyStop
+        })
+      ),
+      // --- Right Side Button (Triggers Critical Hack) ---
+      React.createElement(TouchableOpacity, { testID: 'TouchableOpacity-3', style: {
+          position: 'absolute',
+          bottom: insets.bottom + 2,
+          right: 2,
+          paddingHorizontal: 6,
+          paddingVertical: 4,
+          backgroundColor: 'transparent',
+          borderWidth: 0,
+          shadowColor: 'transparent',
+          shadowOpacity: 0,
+          elevation: 0,
+          zIndex: 999
+        },
+        onPress: handleSecretHack,
+        activeOpacity: 1,
+        componentId: 'TB'
+      },
+        React.createElement(Text, { testID: 'Text-TB', style: {
+          fontSize: 10,
+          color: '#BDBDBD',
+          fontWeight: '400',
+          letterSpacing: 0.2
+        } }, 'v1.0.4')
+      ),
+      // --- Left Side Button (Resets Hack to Normal) ---
+      React.createElement(TouchableOpacity, { testID: 'TouchableOpacity-4', style: {
+          position: 'absolute',
+          bottom: insets.bottom + 2,
+          left: 2,
+          paddingHorizontal: 6,
+          paddingVertical: 4,
+          backgroundColor: 'transparent',
+          borderWidth: 0,
+          shadowColor: 'transparent',
+          shadowOpacity: 0,
+          elevation: 0,
+          zIndex: 999
+        },
+        onPress: handleNormalizeHack,
+        activeOpacity: 1,
+        componentId: 'TB-Norm'
+      },
+        React.createElement(Text, { testID: 'Text-TB-Norm', style: {
+          fontSize: 10,
+          color: '#BDBDBD',
+          fontWeight: '400',
+          letterSpacing: 0.2
+        } }, 'v1.0.5')
+      )
+    );
+  };
+  // @end:DashboardScreen
+
+  // @section:styles @depends:[theme]
+  const styles = StyleSheet.create({
+    screenHeader: {
+      marginBottom: 14,
+      paddingHorizontal: 4
+    },
+    screenHeaderTitle: {
+      fontSize: 22,
+      fontWeight: '800',
+      color: primaryColor,
+      letterSpacing: 0.3
+    },
+    screenHeaderSub: {
+      fontSize: 12,
+      color: textSecondary,
+      marginTop: 2,
+      fontWeight: '500',
+      letterSpacing: 0.2
+    },
+    statusBanner: {
+      borderRadius: 16,
+      paddingVertical: 22,
+      paddingHorizontal: 20,
+      marginBottom: 18,
+      shadowColor: '#15803D',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.28,
+      shadowRadius: 12,
+      elevation: 8
+    },
+    statusMainLabel: {
+      fontSize: 20,
+      fontWeight: '900',
+      color: '#FFFFFF',
+      letterSpacing: 0.5,
+      textAlign: 'center',
+      textShadowColor: 'rgba(0,0,0,0.2)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 3
+    },
+    statusDivider: {
+      height: 1,
+      backgroundColor: 'rgba(255,255,255,0.3)',
+      marginVertical: 10,
+      marginHorizontal: 10
+    },
+    statusSubLabel: {
+      fontSize: 14,
+      color: 'rgba(255,255,255,0.92)',
+      textAlign: 'center',
+      fontWeight: '600',
+      letterSpacing: 0.3
+    },
+    telemetrySection: {
+      marginBottom: 6
+    },
+    sectionLabelRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 10,
+      paddingHorizontal: 4
+    },
+    sectionHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 6
+    },
+    sectionAccentBar: {
+      width: 4,
+      height: 18,
+      borderRadius: 2,
+      marginRight: 8
+    },
+    sectionTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: textPrimary,
+      letterSpacing: 0.2
+    },
+    sectionSubtitle: {
+      fontSize: 12,
+      color: textSecondary,
+      marginBottom: 14,
+      lineHeight: 18
+    },
+    telemetryCard: {
+      backgroundColor: cardColor,
+      borderRadius: 14,
+      padding: 16,
+      marginBottom: 10,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.07,
+      shadowRadius: 8,
+      elevation: 3,
+      borderWidth: 1,
+      borderColor: '#EEF0EE'
+    },
+    telemetryCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 12
+    },
+    telemetryIconBadge: {
+      width: 40,
+      height: 40,
+      borderRadius: 10,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 10
+    },
+    telemetryCardTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: textSecondary,
+      letterSpacing: 0.3,
+      textTransform: 'uppercase',
+      flex: 1
+    },
+    telemetryCardBody: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between'
+    },
+    telemetryValue: {
+      fontSize: 28,
+      fontWeight: '800',
+      color: textPrimary,
+      letterSpacing: 0.5
+    },
+    evalBadge: {
+      borderRadius: 20,
+      paddingHorizontal: 14,
+      paddingVertical: 5
+    },
+    telemetryEval: {
+      fontSize: 13,
+      color: textSecondary,
+      fontWeight: '600'
+    },
+    sectionCard: {
+      backgroundColor: cardColor,
+      borderRadius: 14,
+      padding: 18,
+      marginBottom: 14,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.06,
+      shadowRadius: 8,
+      elevation: 3,
+      borderWidth: 1,
+      borderColor: '#EEF0EE'
+    },
+    timersRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginBottom: 14
+    },
+    timerInputGroup: {
+      flex: 1,
+      alignItems: 'center'
+    },
+    timerDividerV: {
+      width: 1,
+      height: 70,
+      backgroundColor: borderColor,
+      marginTop: 8
+    },
+    timerIconRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 8,
+      gap: 4
+    },
+    timerLabel: {
+      fontSize: 11,
+      color: textSecondary,
+      fontWeight: '600',
+      textAlign: 'center',
+      letterSpacing: 0.1,
+      flex: 1,
+      flexWrap: 'wrap'
+    },
+    timerInput: {
+      backgroundColor: sectionBg,
+      borderWidth: 1.5,
+      borderColor: '#D1D5DB',
+      borderRadius: 10,
+      paddingVertical: 10,
+      paddingHorizontal: 8,
+      fontSize: 22,
+      fontWeight: '800',
+      color: primaryColor,
+      textAlign: 'center',
+      width: '80%'
+    },
+    interlockNote: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      backgroundColor: '#F0FDF4',
+      borderRadius: 8,
+      padding: 10,
+      borderWidth: 1,
+      borderColor: '#BBF7D0',
+      gap: 6
+    },
+    interlockNoteText: {
+      fontSize: 12,
+      color: '#166534',
+      flex: 1,
+      lineHeight: 17,
+      fontWeight: '500'
+    },
+    drainButton: {
+      backgroundColor: drainRed,
+      borderRadius: 14,
+      paddingVertical: 16,
+      paddingHorizontal: 20,
+      shadowColor: '#DC2626',
+      shadowOffset: { width: 0, height: 5 },
+      shadowOpacity: 0.3,
+      shadowRadius: 10,
+      elevation: 6
+    },
+    refillButton: {
+      backgroundColor: refillGreen,
+      borderRadius: 14,
+      paddingVertical: 16,
+      paddingHorizontal: 20,
+      shadowColor: '#15803D',
+      shadowOffset: { width: 0, height: 5 },
+      shadowOpacity: 0.3,
+      shadowRadius: 10,
+      elevation: 6
+    },
+    stopButton: {
+      backgroundColor: '#111827',
+      borderRadius: 14,
+      paddingVertical: 16,
+      paddingHorizontal: 20,
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: 5 },
+      shadowOpacity: 0.3,
+      shadowRadius: 10,
+      elevation: 6
+    },
+    actionButtonInner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center'
+    },
+    actionButtonLabel: {
+      fontSize: 16,
+      fontWeight: '900',
+      color: '#FFFFFF',
+      letterSpacing: 0.8,
+      textAlign: 'center'
+    },
+    actionButtonSub: {
+      fontSize: 11,
+      color: 'rgba(255,255,255,0.8)',
+      fontWeight: '500',
+      textAlign: 'center',
+      marginTop: 2
+    }
+  });
+  // @end:styles
+
+  // @section:return @depends:[DashboardScreen]
+  return React.createElement(DashboardScreen);
+  // @end:return
+};
+return ComponentFunction;
