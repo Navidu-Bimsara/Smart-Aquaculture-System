@@ -126,8 +126,8 @@ const ComponentFunction = function() {
         // ---------------------------------------------------------
         // 2. SEND TELEGRAM MESSAGE (Direct Bot API)
         // ---------------------------------------------------------
-        var telegramBotToken = "8721279885:AAHBcpF4aGQ5Pr04eU-g6KKvlBSVrKsp2nE";
-        var telegramChatId = "1087449863";
+        var telegramBotToken = "";
+        var telegramChatId = "";
         
         var tgMessage = "🚨 *AQUAFARM CRITICAL ALERT* 🚨\n\n" +
                         "🌡️ Temp: " + currentTemp + "°C\n" +
