@@ -124,7 +124,7 @@ const ComponentFunction = function() {
         });
 
         // ---------------------------------------------------------
-        // 2. SEND TELEGRAM MESSAGE (Direct Bot API)
+       
         // ---------------------------------------------------------
         var telegramBotToken = "";
         var telegramChatId = "";
