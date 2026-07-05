@@ -38,9 +38,8 @@ An automated, fault-tolerant smart aquarium management system driven by an ESP32
 
 ## 📁 Repository Structure
 * `/Firmware` - Source code for the ESP32 microcontroller and dependency list.
-* `/Hardware` - KiCad schematics, PCB layout files, and Gerber manufacturing files.
-* `/Mobile-App` - Thunkable block logic screenshots and JavaScript implementation details.
-* `/Images` - High-resolution photos of the custom PCB, hardware assembly, and mobile dashboard.
+* * `/Mobile-App` - Thunkable block logic screenshots and JavaScript implementation details.
+
 
 ## 📜 License
 This project is licensed under the MIT License - see the `LICENSE` file for details.
