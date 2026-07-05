@@ -1,0 +1,127 @@
+#include <WiFi.h>
+#include <FirebaseESP32.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+// --- WIFI CONFIGURATION ---
+// ⚠️ REPLACE WITH YOUR ACTUAL CREDENTIALS BEFORE FLASHING
+#define WIFI_SSID "YOUR_WIFI_SSID_HERE"
+#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD_HERE"
+
+// --- FIREBASE CONFIGURATION ---
+// No "https://" or "/" at the end!
+#define FIREBASE_HOST "aquacontrol-6408d-default-rtdb.asia-southeast1.firebasedatabase.app"
+
+// ⚠️ REPLACE WITH YOUR ACTUAL FIREBASE SECRET BEFORE FLASHING
+// Find this in Firebase Console -> Project Settings -> Service Accounts -> Database Secrets
+#define FIREBASE_AUTH "YOUR_FIREBASE_DATABASE_SECRET_HERE" 
+
+// --- PIN DEFINITIONS ---
+const int TURBIDITY_PIN = 34; 
+const int PH_PIN = 35;        
+const int TEMP_PIN = 4;       
+const int DRAIN_PIN = 26;     
+const int REFILL_PIN = 27;    
+
+OneWire oneWire(TEMP_PIN);
+DallasTemperature tempSensor(&oneWire);
+
+// Define Firebase objects 
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+
+unsigned long sendDataPrevMillis = 0;
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Set Relay Pins
+  pinMode(DRAIN_PIN, OUTPUT); 
+  pinMode(REFILL_PIN, OUTPUT);
+  
+  // Assuming Active-LOW relays (HIGH = OFF, LOW = ON)
+  digitalWrite(DRAIN_PIN, HIGH); 
+  digitalWrite(REFILL_PIN, HIGH); 
+  
+  // Initialize Temp Sensor
+  tempSensor.begin();
+
+  // Connect to Wi-Fi
+  Serial.print("Connecting to Wi-Fi");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println("\nWi-Fi Connected!");
+
+  // Connect to Firebase 
+  config.database_url = FIREBASE_HOST;
+  config.signer.tokens.legacy_token = FIREBASE_AUTH;
+
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+  Serial.println("Connected to Firebase Cloud!");
+}
+
+void loop() {
+  // Read and send data every 2 seconds to match the mobile app polling rate
+  if (millis() - sendDataPrevMillis > 2000 || sendDataPrevMillis == 0) {
+    sendDataPrevMillis = millis();
+
+    // ---------------------------------------------------------
+    // 1. READ REAL SENSOR VALUES
+    // ---------------------------------------------------------
+    tempSensor.requestTemperatures(); 
+    float tempC = tempSensor.getTempCByIndex(0);
+
+    long rawPhSum = 0;
+    for (int i = 0; i < 20; i++) { rawPhSum += analogRead(PH_PIN); delay(5); }
+    float espVoltage = (rawPhSum / 20.0) * (3.3 / 4095.0);
+    float phValue = ( (2.5 - espVoltage) * 3.5 ) + 7.0 + 0.6; 
+    if (phValue < 0) phValue = 0; 
+    if (phValue > 14) phValue = 14;
+
+    float turbVoltage = analogRead(TURBIDITY_PIN) * (3.3 / 4095.0);
+
+    // ---------------------------------------------------------
+    // 2. CHECK PRESENTATION HACK MODE
+    // ---------------------------------------------------------
+    int hackMode = 0;
+    if (Firebase.getInt(fbdo, "/Simulation/inject_contamination_hack")) {
+      hackMode = fbdo.intData();
+    }
+
+    // If you tapped the fake button, override ONLY the clarity!
+    if (hackMode == 1) {
+      turbVoltage = 0.22; // Critical Clarity ONLY
+      Serial.println("⚠️ HACK ACTIVE: Clarity is Fake/Critical. Temp & pH are Real!");
+    } else {
+      turbVoltage = 3.50; // Constant Safe Clarity
+      Serial.println("✅ NORMAL MODE: Clarity is Locked/Safe. Temp & pH are Real!");
+    }
+
+    // ---------------------------------------------------------
+    // 3. UPLOAD TELEMETRY TO APP
+    // ---------------------------------------------------------
+    Firebase.setFloat(fbdo, "/Telemetry/temperature", tempC);
+    Firebase.setFloat(fbdo, "/Telemetry/pH", phValue);
+    Firebase.setFloat(fbdo, "/Telemetry/turbidity", turbVoltage);
+
+    // ---------------------------------------------------------
+    // 4. LISTEN FOR PUMP/VALVE COMMANDS FROM APP
+    // ---------------------------------------------------------
+    if (Firebase.getInt(fbdo, "/Controls/drain_relay")) {
+      int drainState = fbdo.intData();
+      // If app sends 1, turn pin LOW (ON). If 0, turn HIGH (OFF).
+      digitalWrite(DRAIN_PIN, drainState == 1 ? LOW : HIGH); 
+    }
+    
+    if (Firebase.getInt(fbdo, "/Controls/refill_relay")) {
+      int refillState = fbdo.intData();
+      // If app sends 1, turn pin LOW (ON). If 0, turn HIGH (OFF).
+      digitalWrite(REFILL_PIN, refillState == 1 ? LOW : HIGH); 
+    }
+  }
+}
